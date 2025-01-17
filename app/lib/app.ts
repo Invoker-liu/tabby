@@ -65,7 +65,7 @@ export class Application {
 
         if (process.platform === 'linux') {
             app.commandLine.appendSwitch('no-sandbox')
-            if (((this.configStore.appearance || {}).opacity || 1) !== 1) {
+            if ((this.configStore.appearance?.opacity || 1) !== 1) {
                 app.commandLine.appendSwitch('enable-transparent-visuals')
                 app.disableHardwareAcceleration()
             }
@@ -112,7 +112,7 @@ export class Application {
     async newWindow (options?: WindowOptions): Promise<Window> {
         const window = new Window(this, this.configStore, options)
         this.windows.push(window)
-        if (this.windows.length === 1){
+        if (this.windows.length === 1) {
             window.makeMain()
         }
         window.visible$.subscribe(visible => {
@@ -169,7 +169,7 @@ export class Application {
 
     broadcastExcept (event: string, except: WebContents, ...args: any[]): void {
         for (const window of this.windows) {
-            if (window.webContents.id === except.id) {
+            if (window.webContents.id !== except.id) {
                 window.send(event, ...args)
             }
         }
@@ -183,9 +183,10 @@ export class Application {
     }
 
     enableTray (): void {
-        if (this.tray || process.platform === 'linux') {
+        if (!!this.tray || process.platform === 'linux' || (this.configStore.hideTray ?? false) === true) {
             return
         }
+
         if (process.platform === 'darwin') {
             this.tray = new Tray(`${app.getAppPath()}/assets/tray-darwinTemplate.png`)
             this.tray.setPressedImage(`${app.getAppPath()}/assets/tray-darwinHighlightTemplate.png`)

@@ -48,15 +48,6 @@ import { SFTPCreateDirectoryModalComponent } from './components/sftpCreateDirect
         { provide: ProfileProvider, useExisting: SSHProfilesService, multi: true },
         { provide: SFTPContextMenuItemProvider, useClass: CommonSFTPContextMenu, multi: true },
     ],
-    entryComponents: [
-        SSHProfileSettingsComponent,
-        SFTPDeleteModalComponent,
-        SFTPCreateDirectoryModalComponent,
-        SSHPortForwardingModalComponent,
-        SSHSettingsTabComponent,
-        SSHTabComponent,
-        HostKeyPromptModalComponent,
-    ],
     declarations: [
         SSHProfileSettingsComponent,
         SFTPDeleteModalComponent,
@@ -75,4 +66,4 @@ export default class SSHModule { }
 
 export * from './api'
 export { SFTPFile, SFTPSession } from './session/sftp'
-export { SFTPPanelComponent, SFTPContextMenuItemProvider }
+export { SFTPPanelComponent }

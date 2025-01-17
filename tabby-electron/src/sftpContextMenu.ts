@@ -21,15 +21,21 @@ export class EditSFTPContextMenu extends SFTPContextMenuItemProvider {
     }
 
     async getItems (item: SFTPFile, panel: SFTPPanelComponent): Promise<MenuItemOptions[]> {
-        if (item.isDirectory) {
-            return []
-        }
-        return [
+        const items: MenuItemOptions[] = [
             {
-                click: () => this.edit(item, panel.sftp),
-                label: this.translate.instant('Edit locally'),
+                click: () => this.platform.setClipboard({
+                    text: item.fullPath,
+                }),
+                label: this.translate.instant('Copy full path'),
             },
         ]
+        if (!item.isDirectory) {
+            items.push({
+                click: () => this.edit(item, panel.sftp),
+                label: this.translate.instant('Edit locally'),
+            })
+        }
+        return items
     }
 
     private async edit (item: SFTPFile, sftp: SFTPSession) {
@@ -43,18 +49,24 @@ export class EditSFTPContextMenu extends SFTPContextMenuItemProvider {
         this.platform.openPath(tempPath)
 
         const events = new Subject<string>()
-        const watcher = fs.watch(tempPath, event => events.next(event))
-        events.pipe(debounceTime(1000), debounce(async event => {
-            if (event === 'rename') {
-                watcher.close()
-            }
-            const upload = await this.platform.startUpload({ multiple: false }, [tempPath])
-            if (!upload.length) {
-                return
-            }
-            sftp.upload(item.fullPath, upload[0])
-        })).subscribe()
-        watcher.on('close', () => events.complete())
-        sftp.closed$.subscribe(() => watcher.close())
+        fs.chmodSync(tempPath, 0o700)
+
+        // skip the first burst of events
+        setTimeout(() => {
+            const watcher = fs.watch(tempPath, event => events.next(event))
+            events.pipe(debounceTime(1000), debounce(async event => {
+                if (event === 'rename') {
+                    watcher.close()
+                }
+                const upload = await this.platform.startUpload({ multiple: false }, [tempPath])
+                if (!upload.length) {
+                    return
+                }
+                await sftp.upload(item.fullPath, upload[0])
+                await sftp.chmod(item.fullPath, item.mode)
+            })).subscribe()
+            watcher.on('close', () => events.complete())
+            sftp.closed$.subscribe(() => watcher.close())
+        }, 1000)
     }
 }

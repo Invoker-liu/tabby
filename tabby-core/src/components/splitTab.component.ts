@@ -1,11 +1,10 @@
-import { Observable, Subject } from 'rxjs'
-import { Component, Injectable, ViewChild, ViewContainerRef, EmbeddedViewRef, AfterViewInit, OnDestroy } from '@angular/core'
+import { Observable, Subject, takeWhile } from 'rxjs'
+import { Component, Injectable, ViewChild, ViewContainerRef, EmbeddedViewRef, AfterViewInit, OnDestroy, Injector } from '@angular/core'
 import { BaseTabComponent, BaseTabProcess, GetRecoveryTokenOptions } from './baseTab.component'
 import { TabRecoveryProvider, RecoveryToken } from '../api/tabRecovery'
 import { TabsService, NewTabParameters } from '../services/tabs.service'
 import { HotkeysService } from '../services/hotkeys.service'
 import { TabRecoveryService } from '../services/tabRecovery.service'
-import { ConfigService } from '../api'
 
 export type SplitOrientation = 'v' | 'h'
 export type SplitDirection = 'r' | 't' | 'b' | 'l'
@@ -169,6 +168,7 @@ export type SplitDropZoneInfo = {
             [container]='spanner.container'
             [index]='spanner.index'
             (change)='onSpannerAdjusted(spanner)'
+            (resizing)='onSpannerResizing($event)'
         ></split-tab-spanner>
         <split-tab-drop-zone
             *ngFor='let dropZone of _dropZones'
@@ -186,7 +186,7 @@ export type SplitDropZoneInfo = {
         >
         </split-tab-pane-label>
     `,
-    styles: [require('./splitTab.component.scss')],
+    styleUrls: ['./splitTab.component.scss'],
 })
 export class SplitTabComponent extends BaseTabComponent implements AfterViewInit, OnDestroy {
     static DIRECTIONS: SplitDirection[] = ['t', 'r', 'b', 'l']
@@ -210,6 +210,9 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
 
     /** @hidden */
     _allFocusMode = false
+
+    /** @hidden */
+    _spannerResizing = false
 
     /**
      * Disables display of dynamic window/tab title provided by the shell
@@ -257,9 +260,9 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
         private hotkeys: HotkeysService,
         private tabsService: TabsService,
         private tabRecovery: TabRecoveryService,
-        private config: ConfigService,
+        injector: Injector,
     ) {
-        super()
+        super(injector)
         this.root = new SplitContainer()
         this.setTitle('')
 
@@ -272,6 +275,7 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
             }
         })
         this.blurred$.subscribe(() => this.getAllTabs().forEach(x => x.emitBlurred()))
+        this.visibility$.subscribe(visibility => this.getAllTabs().forEach(x => x.emitVisibility(visibility)))
 
         this.tabAdded$.subscribe(() => this.updateTitle())
         this.tabRemoved$.subscribe(() => this.updateTitle())
@@ -346,7 +350,7 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
                     }
                     break
                 case 'close-pane':
-                    this.removeTab(this.focusedTab)
+                    this.focusedTab.destroy()
                     break
                 case 'pane-increase-vertical':
                     this.resizePane('v')
@@ -377,6 +381,9 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
                     }
                 }
             }, 100)
+
+            // Propagate visibility to new children
+            this.emitVisibility(this.visibility.value)
         }
         this.initialized.next()
         this.initialized.complete()
@@ -455,17 +462,25 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
             tab.destroy()
         }
 
+        let allTabs: BaseTabComponent[] = []
         if (thing instanceof BaseTabComponent) {
-            if (thing.parent instanceof SplitTabComponent) {
-                thing.parent.removeTab(thing)
+            allTabs = [thing]
+        } else if (thing instanceof SplitContainer) {
+            allTabs = thing.getAllTabs()
+        }
+        for (const tab of allTabs) {
+            if (tab.parent instanceof SplitTabComponent) {
+                tab.parent.removeTab(tab)
             }
-            thing.removeFromContainer()
-            thing.parent = this
+            tab.removeFromContainer()
+            tab.parent = this
+
+            tab.emitVisibility(this.visibility.value)
         }
 
         let target = relative ? this.getParentOf(relative) : null
         if (!target) {
-            // Rewrap the root container just in case the orientation isn't compatibile
+            // Rewrap the root container just in case the orientation isn't compatible
             target = new SplitContainer()
             target.orientation = ['l', 'r'].includes(side) ? 'h' : 'v'
             target.children = [this.root]
@@ -620,6 +635,44 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
         this.layout()
     }
 
+    private getPaneRect (pane: BaseTabComponent): DOMRect {
+        const viewRef = this.viewRefs.get(pane)!
+        const element = viewRef.rootNodes[0] as HTMLElement
+        return element.getBoundingClientRect()
+    }
+
+    getNearestPaneInDirection (from: BaseTabComponent, direction: SplitDirection): BaseTabComponent {
+        const rect = this.getPaneRect(from)
+
+        let nearest: BaseTabComponent | null = null
+        let nearestDistance = Infinity
+
+        let panes = this.getAllTabs().map(pane => ({ pane, rect: this.getPaneRect(pane) }))
+
+        if (direction === 'l') {
+            panes = panes.filter(pane => pane.rect.right <= rect.left)
+        } else if (direction === 'r') {
+            panes = panes.filter(pane => pane.rect.left >= rect.right)
+        } else if (direction === 't') {
+            panes = panes.filter(pane => pane.rect.bottom <= rect.top)
+        } else {
+            panes = panes.filter(pane => pane.rect.top >= rect.bottom)
+        }
+
+        for (const pane of panes) {
+            if (pane.pane === from) {
+                continue
+            }
+            const distance = Math.abs(rect.left + rect.width / 2 - pane.rect.left - pane.rect.width / 2) + Math.abs(rect.top + rect.height / 2 - pane.rect.top - pane.rect.height / 2)
+            if (distance < nearestDistance) {
+                nearest = pane.pane
+                nearestDistance = distance
+            }
+        }
+
+        return nearest ?? from
+    }
+
     /**
      * Moves focus in the given direction
      */
@@ -628,36 +681,7 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
             return
         }
 
-        let rel: BaseTabComponent | SplitContainer = this.focusedTab
-        let parent = this.getParentOf(rel)
-        if (!parent) {
-            return
-        }
-
-        const orientation = ['l', 'r'].includes(dir) ? 'h' : 'v'
-
-        while (parent !== this.root && parent.orientation !== orientation) {
-            rel = parent
-            parent = this.getParentOf(rel)
-            if (!parent) {
-                return
-            }
-        }
-
-        if (parent.orientation !== orientation) {
-            return
-        }
-
-        const index = parent.children.indexOf(rel)
-        if (['l', 't'].includes(dir)) {
-            if (index > 0) {
-                this.focusAnyIn(parent.children[index - 1])
-            }
-        } else {
-            if (index < parent.children.length - 1) {
-                this.focusAnyIn(parent.children[index + 1])
-            }
-        }
+        this.focus(this.getNearestPaneInDirection(this.focusedTab, dir))
     }
 
     navigateLinear (delta: number): void {
@@ -729,6 +753,11 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
     }
 
     /** @hidden */
+    onSpannerResizing (state: boolean): void {
+        this._spannerResizing = state
+    }
+
+    /** @hidden */
     onTabDropped (tab: BaseTabComponent, zone: SplitDropZoneInfo) { // eslint-disable-line @typescript-eslint/explicit-module-boundary-types
         if (tab === this) {
             return
@@ -743,10 +772,10 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
     }
 
     destroy (): void {
-        super.destroy()
         for (const x of this.getAllTabs()) {
             x.destroy()
         }
+        super.destroy()
     }
 
     layout (): void {
@@ -764,7 +793,7 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
     }
 
     get icon (): string|null {
-        return this.getFocusedTab()?.icon ?? null
+        return this.getFocusedTab()?.icon ?? this.getAllTabs()[0]?.icon ?? null
     }
 
     set icon (icon: string|null) {
@@ -774,7 +803,7 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
     }
 
     get color (): string|null {
-        return this.getFocusedTab()?.color ?? null
+        return this.getFocusedTab()?.color ?? this.getAllTabs()[0]?.color ?? null
     }
 
     set color (color: string|null) {
@@ -792,7 +821,13 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
         if (this.disableDynamicTitle) {
             return
         }
-        this.setTitle([...new Set(this.getAllTabs().map(x => x.title))].join(' | '))
+        const titles = [
+            this.getFocusedTab()?.title,
+            ...this.getAllTabs()
+                .filter(x => x !== this.getFocusedTab())
+                .map(x => x.title),
+        ]
+        this.setTitle([...new Set(titles)].join(' | '))
     }
 
     private attachTabView (tab: BaseTabComponent) {
@@ -800,21 +835,48 @@ export class SplitTabComponent extends BaseTabComponent implements AfterViewInit
         this.viewRefs.set(tab, ref)
         tab.addEventListenerUntilDestroyed(ref.rootNodes[0], 'click', () => this.focus(tab))
         if (this.config.store.terminal.focusFollowsMouse) {
-            tab.addEventListenerUntilDestroyed(ref.rootNodes[0], 'mousemove', () => this.focus(tab))
+            tab.addEventListenerUntilDestroyed(ref.rootNodes[0], 'mousemove', () => {
+                if (this._spannerResizing) {
+                    return
+                }
+                this.focus(tab)
+            })
         }
 
-        tab.subscribeUntilDestroyed(tab.titleChange$, () => this.updateTitle())
-        tab.subscribeUntilDestroyed(tab.activity$, a => a ? this.displayActivity() : this.clearActivity())
-        tab.subscribeUntilDestroyed(tab.progress$, p => this.setProgress(p))
+        tab.subscribeUntilDestroyed(
+            this.observeUntilChildDetached(tab, tab.focused$),
+            () => this.updateTitle(),
+        )
+        tab.subscribeUntilDestroyed(
+            this.observeUntilChildDetached(tab, tab.titleChange$),
+            () => this.updateTitle(),
+        )
+        tab.subscribeUntilDestroyed(
+            this.observeUntilChildDetached(tab, tab.activity$),
+            a => a ? this.displayActivity() : this.clearActivity(),
+        )
+        tab.subscribeUntilDestroyed(
+            this.observeUntilChildDetached(tab, tab.progress$),
+            p => this.setProgress(p),
+        )
         if (tab.title) {
             this.updateTitle()
         }
-        tab.subscribeUntilDestroyed(tab.recoveryStateChangedHint$, () => {
-            this.recoveryStateChangedHint.next()
-        })
-        tab.subscribeUntilDestroyed(tab.destroyed$, () => {
+        tab.subscribeUntilDestroyed(
+            this.observeUntilChildDetached(tab, tab.recoveryStateChangedHint$),
+            () => {
+                this.recoveryStateChangedHint.next()
+            },
+        )
+        tab.destroyed$.subscribe(() => {
             this.removeTab(tab)
         })
+    }
+
+    private observeUntilChildDetached<T> (tab: BaseTabComponent, event: Observable<T>): Observable<T> {
+        return event.pipe(takeWhile(() => {
+            return this.getAllTabs().includes(tab)
+        }))
     }
 
     private onAfterTabAdded (tab: BaseTabComponent) {

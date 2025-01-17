@@ -22,6 +22,8 @@ hotkeys:
     - 'Ctrl-Shift'
   duplicate-tab: []
   restart-tab: []
+  reconnect-tab: []
+  disconnect-tab: []
   explode-tab:
     - 'Ctrl-Shift-.'
   combine-tabs:
@@ -94,3 +96,5 @@ hotkeys:
     - 'Ctrl-Alt-T'
   profile-selector:
     - 'Ctrl-Shift-E'
+  command-selector:
+    - 'Ctrl-Shift-P'

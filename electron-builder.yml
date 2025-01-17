@@ -3,8 +3,6 @@ appId: org.tabby
 productName: Tabby
 compression: normal
 npmRebuild: false
-afterSign: "./build/mac/afterSignHook.js"
-afterAllArtifactBuild: "./build/mac/afterBuildHook.js"
 files:
 - '**/*'
 - dist
@@ -34,9 +32,8 @@ extraResources:
 - extras
 asarUnpack:
 - 'dist/*.map'
-publish:
-- provider: github
-
+- node_modules/keytar/build/Release/*.node
+- node_modules/**/*.node
 win:
   icon: "./build/windows/icon.ico"
   artifactName: tabby-${version}-portable-${env.ARCH}.${ext}
@@ -55,6 +52,7 @@ mac:
   entitlements: "./build/mac/entitlements.plist"
   entitlementsInherit: "./build/mac/entitlements.plist"
   extendInfo:
+    ElectronTeamID: ${teamId}
     NSRequiresAquaSystemAppearance: false
     NSCameraUsageDescription: "A subprocess requests access to the device's camera."
     NSMicrophoneUsageDescription: "A subprocess requests access to the device's microphone."
@@ -64,6 +62,7 @@ mac:
     NSDownloadsFolderUsageDescription: "A subprocess requests access to the user's Downloads folder."
     NSNetworkVolumesUsageDescription: 'A subprocess requests access to files on a network volume.'
     NSRemovableVolumesUsageDescription: 'A subprocess requests access to files on a removable volume.'
+    NSAppleEventsUsageDescription: 'A subprocess requests permission to send AppleScript events to another application.'
 
 linux:
   category: "Utility;TerminalEmulator;System"
@@ -72,7 +71,8 @@ linux:
   executableArgs:
   - "--no-sandbox"
   desktop:
-    StartupWMClass: tabby
+    entry:
+      StartupWMClass: tabby
 snap:
   plugs:
   - default
@@ -80,8 +80,6 @@ snap:
   - system-observe
 deb:
   depends:
-  - gconf2
-  - gconf-service
   - gnome-keyring
   - libnotify4
   - libsecret-1-0
@@ -103,3 +101,7 @@ rpm:
   - '_build_id_links none'
   - '--replaces'
   - 'terminus-terminal'
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false

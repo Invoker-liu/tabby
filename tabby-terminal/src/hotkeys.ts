@@ -14,6 +14,10 @@ export class TerminalHotkeyProvider extends HotkeyProvider {
             name: this.translate.instant('Paste from clipboard'),
         },
         {
+            id: 'select-all',
+            name: this.translate.instant('Select all'),
+        },
+        {
             id: 'home',
             name: this.translate.instant('Beginning of the line'),
         },
@@ -74,6 +78,10 @@ export class TerminalHotkeyProvider extends HotkeyProvider {
             name: this.translate.instant('Focus all panes at once (broadcast)'),
         },
         {
+            id: 'focus-all-tabs',
+            name: this.translate.instant('Focus all tabs at once (broadcast)'),
+        },
+        {
             id: 'scroll-to-top',
             name: this.translate.instant('Scroll terminal to top'),
         },
@@ -88,6 +96,14 @@ export class TerminalHotkeyProvider extends HotkeyProvider {
         {
             id: 'scroll-to-bottom',
             name: this.translate.instant('Scroll terminal to bottom'),
+        },
+        {
+            id: 'reconnect-tab',
+            name: this.translate.instant('Reconnect current tab (Serial/Telnet/SSH)'),
+        },
+        {
+            id: 'disconnect-tab',
+            name: this.translate.instant('Disconnect current tab (Serial/Telnet/SSH)'),
         },
     ]
 

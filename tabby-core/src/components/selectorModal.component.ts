@@ -1,13 +1,14 @@
 import { firstBy } from 'thenby'
 import { Component, Input, HostListener, ViewChildren, QueryList, ElementRef } from '@angular/core' // eslint-disable-line @typescript-eslint/no-unused-vars
 import { NgbActiveModal } from '@ng-bootstrap/ng-bootstrap'
+import FuzzySearch from 'fuzzy-search'
 import { SelectorOption } from '../api/selector'
 
 /** @hidden */
 @Component({
     selector: 'selector-modal',
-    template: require('./selectorModal.component.pug'),
-    styles: [require('./selectorModal.component.scss')],
+    templateUrl: './selectorModal.component.pug',
+    styleUrls: ['./selectorModal.component.scss'],
 })
 export class SelectorModalComponent<T> {
     @Input() options: SelectorOption<T>[]
@@ -17,41 +18,58 @@ export class SelectorModalComponent<T> {
     @Input() selectedIndex = 0
     hasGroups = false
     @ViewChildren('item') itemChildren: QueryList<ElementRef>
+    private preventEdit: boolean
 
-    constructor (
-        public modalInstance: NgbActiveModal,
-    ) { }
+    constructor (public modalInstance: NgbActiveModal) {
+        this.preventEdit = false
+    }
 
     ngOnInit (): void {
         this.onFilterChange()
         this.hasGroups = this.options.some(x => x.group)
     }
 
-    @HostListener('keydown', ['$event']) onKeyUp (event: KeyboardEvent): void {
-        if (event.key === 'ArrowUp') {
-            this.selectedIndex--
-            event.preventDefault()
-        }
-        if (event.key === 'ArrowDown') {
-            this.selectedIndex++
-            event.preventDefault()
-        }
-        if (event.key === 'Enter') {
-            this.selectOption(this.filteredOptions[this.selectedIndex])
-        }
+    @HostListener('keydown', ['$event']) onKeyDown (event: KeyboardEvent): void {
         if (event.key === 'Escape') {
             this.close()
-        }
-        if (event.key === 'Backspace' && this.canEditSelected()) {
-            this.filter = this.filteredOptions[this.selectedIndex].freeInputEquivalent!
-            this.onFilterChange()
-        }
+        } else if (this.filteredOptions.length > 0) {
+            if (event.key === 'PageUp' || event.key === 'ArrowUp' && event.metaKey) {
+                this.selectedIndex -= Math.min(10, Math.max(1, this.selectedIndex))
+                event.preventDefault()
+            } else if (event.key === 'PageDown' || event.key === 'ArrowDown' && event.metaKey) {
+                this.selectedIndex += Math.min(10, Math.max(1, this.filteredOptions.length - this.selectedIndex - 1))
+                event.preventDefault()
+            } else if (event.key === 'ArrowUp') {
+                this.selectedIndex--
+                event.preventDefault()
+            } else if (event.key === 'ArrowDown') {
+                this.selectedIndex++
+                event.preventDefault()
+            } else if (event.key === 'Enter') {
+                this.selectOption(this.filteredOptions[this.selectedIndex])
+            } else if (event.key === 'Backspace' && !this.preventEdit) {
+                if (this.canEditSelected()) {
+                    event.preventDefault()
+                    this.filter = this.filteredOptions[this.selectedIndex].freeInputEquivalent!
+                    this.onFilterChange()
+                } else {
+                    this.preventEdit = true
+                }
+            }
 
-        this.selectedIndex = (this.selectedIndex + this.filteredOptions.length) % this.filteredOptions.length
-        Array.from(this.itemChildren)[this.selectedIndex]?.nativeElement.scrollIntoView({
-            behavior: 'smooth',
-            block: 'nearest',
-        })
+            this.selectedIndex = (this.selectedIndex + this.filteredOptions.length) % this.filteredOptions.length
+
+            Array.from(this.itemChildren)[this.selectedIndex]?.nativeElement.scrollIntoView({
+                behavior: 'smooth',
+                block: 'nearest',
+            })
+        }
+    }
+
+    @HostListener('keyup', ['$event']) onKeyUp (event: KeyboardEvent): void {
+        if (event.key === 'Backspace' && this.preventEdit) {
+            this.preventEdit = false
+        }
     }
 
     onFilterChange (): void {
@@ -60,13 +78,22 @@ export class SelectorModalComponent<T> {
             this.filteredOptions = this.options.slice().sort(
                 firstBy<SelectorOption<T>, number>(x => x.weight ?? 0)
                     .thenBy<SelectorOption<T>, string>(x => x.group ?? '')
-                    .thenBy<SelectorOption<T>, string>(x => x.name)
+                    .thenBy<SelectorOption<T>, string>(x => x.name),
             )
                 .filter(x => !x.freeInputPattern)
         } else {
-            const terms = f.split(' ')
             // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
-            this.filteredOptions = this.options.filter(x => x.freeInputPattern ?? this.filterMatches(x, terms))
+            this.filteredOptions = new FuzzySearch(
+                this.options,
+                ['name', 'group', 'description'],
+                { sort: true },
+            ).search(f)
+
+            this.options.filter(x => x.freeInputPattern).sort(firstBy<SelectorOption<T>, number>(x => x.weight ?? 0)).forEach(freeOption => {
+                if (!this.filteredOptions.includes(freeOption)) {
+                    this.filteredOptions.push(freeOption)
+                }
+            })
         }
         this.selectedIndex = Math.max(0, this.selectedIndex)
         this.selectedIndex = Math.min(this.filteredOptions.length - 1, this.selectedIndex)
@@ -85,8 +112,8 @@ export class SelectorModalComponent<T> {
     }
 
     selectOption (option: SelectorOption<T>): void {
-        option.callback?.(this.filter)
         this.modalInstance.close(option.result)
+        setTimeout(() => option.callback?.(this.filter))
     }
 
     canEditSelected (): boolean {
